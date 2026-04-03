@@ -1,1 +1,1 @@
-*.txt filter=lfs diff=lfs merge=lfs -text
+1_Polizas_Vigentes.txt filter=lfs diff=lfs merge=lfs -text
