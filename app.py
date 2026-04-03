@@ -5,3 +5,5 @@ st.write("""
 # My first app
 Hello *world!*
 """)
+
+st.file_uploader
