@@ -5,7 +5,7 @@ import pandas as pd
 def main():
     st.set_page_config(page_title="Cargador de Archivos", page_icon="📂", layout="wide")
     
-    st.title("Tarifación Pólizas - SURA")
+    st.title("Mi Aplicación con Layout")
 
     # 1. Definimos las columnas (Proporción 1:3)
     col_a, col_b = st.columns([3, 1])
