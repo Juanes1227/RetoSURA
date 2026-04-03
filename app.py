@@ -18,7 +18,7 @@ def main():
 
     # --- COLUMNA B (Aquí metemos tu lógica) ---
     with col_b:
-        st.header("📂 Cargar de Datos")
+        st.header("📂 Cargar datos")
         st.write("Sube un archivo para analizar su contenido.")
 
         # El widget de carga ahora vive dentro de col_b
