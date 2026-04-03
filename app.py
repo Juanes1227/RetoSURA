@@ -1,6 +1,17 @@
 import streamlit as st
 import pandas as pd
 
+col1, col2 = st.columns(2)
+
+with col1:
+    st.header("Columna A")
+    st.info("Aquí va información.")
+
+with col2:
+    with st.container(border=True): # Crea un recuadro visual
+        st.header("Columna B")
+        st.write("Este contenido está dentro de un borde.")
+
 def main():
     st.set_page_config(page_title="Cargador de Archivos", page_icon="📂")
     
