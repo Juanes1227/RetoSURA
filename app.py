@@ -1,20 +1,14 @@
 import streamlit as st
 import pandas as pd
 
-st.set_page_config(
-    page_title="Mi App Pro",
-    page_icon="🚀",
-    layout="wide", # Usa todo el ancho de la pantalla en lugar de un bloque central
-    initial_sidebar_state="expanded"
-)
 
 def main():
     st.set_page_config(page_title="Cargador de Archivos", page_icon="📂", layout="wide")
     
-    st.title("Mi Aplicación con Layout")
+    st.title("Tarifación Pólizas - SURA")
 
     # 1. Definimos las columnas (Proporción 1:3)
-    col_a, col_b = st.columns([1, 3])
+    col_a, col_b = st.columns([3, 1])
 
     # --- COLUMNA A ---
     with col_a:
@@ -24,7 +18,7 @@ def main():
 
     # --- COLUMNA B (Aquí metemos tu lógica) ---
     with col_b:
-        st.header("📂 Cargador de Datos (Columna B)")
+        st.header("📂 Cargar datos")
         st.write("Sube un archivo para analizar su contenido.")
 
         # El widget de carga ahora vive dentro de col_b
