@@ -1,6 +1,13 @@
 import streamlit as st
 import pandas as pd
 
+st.set_page_config(
+    page_title="Mi App Pro",
+    page_icon="🚀",
+    layout="wide", # Usa todo el ancho de la pantalla en lugar de un bloque central
+    initial_sidebar_state="expanded"
+)
+
 col1, col2 = st.columns(2)
 
 with col1:
