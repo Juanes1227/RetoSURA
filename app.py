@@ -8,11 +8,12 @@ import io
 import google.generativeai as genai
 from docx import Document
 
+
 # 1. Configuración básica de Streamlit
 st.set_page_config(page_title="Cotizador de Renovaciones", page_icon="🛡️", layout="wide")
 st.title("🛡️ Herramienta de Tarifación para Renovaciones")
 
-# --- NUEVO: SISTEMA DE AUTO-GUARDADO Y RECUPERACIÓN ---
+# --- SISTEMA DE AUTO-GUARDADO Y RECUPERACIÓN ---
 archivos_respaldo = {
     'df_polizas': 'backup_polizas.pkl',
     'df_curva': 'backup_curva.pkl',
@@ -20,7 +21,6 @@ archivos_respaldo = {
     'datos_procesados': 'backup_procesados.pkl'
 }
 
-# 2. Inicializar Memoria (Leyendo del disco si existen respaldos)
 for key, archivo in archivos_respaldo.items():
     if key not in st.session_state:
         if os.path.exists(archivo):
@@ -28,13 +28,12 @@ for key, archivo in archivos_respaldo.items():
         else:
             st.session_state[key] = None
 
-# Inicializar memoria para la carta de IA
 if 'carta_generada' not in st.session_state:
     st.session_state['carta_generada'] = None
 if 'poliza_actual_ia' not in st.session_state:
     st.session_state['poliza_actual_ia'] = None
 
-# 3. Función de procesamiento principal
+# 3. Función de procesamiento principal (MODIFICADA CON TPR POR PRODUCTO)
 @st.cache_data(show_spinner=False)
 def procesar_datos(polizas_raw, curva_raw, siniestros_raw):
     polizas = polizas_raw.copy()
@@ -42,7 +41,17 @@ def procesar_datos(polizas_raw, curva_raw, siniestros_raw):
     siniestros = siniestros_raw.copy()
     
     curva_siniestros = pd.merge(siniestros, polizas, on='Poliza_Id', how='left')
-    TPR = curva_siniestros["Valor del Siniestro"].mean() / (curva_siniestros["VA_Ajuste_Prueba"].mean() * 100)
+    
+    # --- NUEVO: TPR POR PRODUCTO (2025) ---
+    curva_2025 = curva_siniestros[curva_siniestros["Year"] == 2025]
+    tpr_por_producto = curva_2025.groupby('Producto_Desc').agg(
+        Total_Siniestros=('Valor del Siniestro', 'sum'),
+        Total_VA=('VA_Ajuste_Prueba', 'sum')
+    ).reset_index()
+    
+    tpr_por_producto['Total_Siniestros'] = tpr_por_producto['Total_Siniestros'] / 100 
+    tpr_por_producto['TPR'] = tpr_por_producto['Total_Siniestros'] / tpr_por_producto['Total_VA']
+    # ---------------------------------------
 
     polizas_riesgo = pd.merge(polizas, curva_riesgo, left_on=['Amparo_Id', 'Edad_Cliente'], right_on=['Amparo_ID', 'Edad'], how='inner')
     polizas_riesgo["PPRC"] = polizas_riesgo["VA_Ajuste_Prueba"] * polizas_riesgo["Tasa"]
@@ -73,9 +82,26 @@ def procesar_datos(polizas_raw, curva_raw, siniestros_raw):
     siniestros_gb["K"] = K_nuevo
     siniestros_gb["Z"] = (siniestros_gb["n"] / (siniestros_gb["n"] + siniestros_gb["K"]))
 
-    tasa_unica_poliza = pd.merge(tasa_unica_poliza, siniestros_gb[['Poliza_Id', 'Z']], on='Poliza_Id', how='left')
+    # --- NUEVO: CRUCE DE TPR CON CREDIBILIDAD ---
+    # 1. Recuperamos el Producto_Desc para siniestros_gb desde pólizas
+    siniestros_gb = siniestros_gb.merge(polizas[['Poliza_Id', 'Producto_Desc']].drop_duplicates(), on='Poliza_Id', how='left')
+    
+    # 2. Traemos la TPR por producto
+    siniestros_gb = siniestros_gb.merge(tpr_por_producto[['Producto_Desc', 'TPR']], on='Producto_Desc', how='left')
+
+    # 3. Consolidamos en tasa_unica_poliza (Usando how='left' para no perder pólizas sin reclamos)
+    tasa_unica_poliza = pd.merge(tasa_unica_poliza, siniestros_gb[['Poliza_Id', 'Z', 'TPR']], on='Poliza_Id', how='left')
+    
+    # Limpiamos vacíos para pólizas sin siniestros/productos nuevos
     tasa_unica_poliza["Z"] = tasa_unica_poliza["Z"].fillna(0)
-    tasa_unica_poliza["tasa_cred"] = (tasa_unica_poliza["Z"] * tasa_unica_poliza["Tasa Unica pura de riesgo"]) + ((1 - tasa_unica_poliza["Z"]) * TPR)
+    
+    # Rellenamos TPR nulas con la TPR global promedio del 2025 como contingencia
+    tpr_global = tpr_por_producto['TPR'].mean() if not tpr_por_producto.empty else 0
+    tasa_unica_poliza["TPR"] = tasa_unica_poliza["TPR"].fillna(tpr_global)
+
+    # Cálculo Final
+    tasa_unica_poliza["tasa_cred"] = (tasa_unica_poliza["Z"] * tasa_unica_poliza["Tasa Unica pura de riesgo"]) + ((1 - tasa_unica_poliza["Z"]) * tasa_unica_poliza["TPR"])
+    tasa_unica_poliza["tasa_cred_com"] = tasa_unica_poliza["tasa_cred"] / (1 - 0.4)
     tasa_unica_poliza["prima_recomendada"] = tasa_unica_poliza["tasa_cred"] * tasa_unica_poliza["VA_Solo_Vida"]
 
     return tasa_unica_poliza
@@ -83,15 +109,12 @@ def procesar_datos(polizas_raw, curva_raw, siniestros_raw):
 
 # 4. BARRA LATERAL: Configuración y Datos
 st.sidebar.header("🔑 Configuración IA")
-
-# Leemos la clave de los secretos en lugar de pedirla por pantalla
 try:
     API_KEY = st.secrets["GEMINI_API_KEY"]
     genai.configure(api_key=API_KEY)
     modelo = genai.GenerativeModel('gemini-2.5-flash')
-    st.sidebar.success("✅ IA Conectada Automáticamente")
 except KeyError:
-    st.sidebar.error("Falta configurar la API Key en los secretos.")
+    st.sidebar.warning("API Key no encontrada en secrets.toml")
     modelo = None
 
 st.sidebar.divider()
@@ -102,7 +125,6 @@ estado_c = "🟢" if st.session_state['df_curva'] is not None else "🔴"
 estado_s = "🟢" if st.session_state['df_siniestros'] is not None else "🔴"
 st.sidebar.markdown(f"{estado_p} Pólizas | {estado_c} Curva | {estado_s} Siniestros")
 
-# A. Actualizar Pólizas
 with st.sidebar.expander("📄 Cargar / Actualizar Pólizas"):
     file_polizas = st.file_uploader("Archivo de Pólizas (.txt, .csv)", type=['txt', 'csv'], key="up_polizas")
     modo_carga = st.radio("Acción a realizar:", ["Reemplazar toda la base", "Actualizar / Agregar específicas"])
@@ -118,9 +140,8 @@ with st.sidebar.expander("📄 Cargar / Actualizar Pólizas"):
             st.session_state['df_polizas'] = pd.concat([df_actual, df_nuevo], ignore_index=True)
             
         st.session_state['df_polizas'].to_pickle(archivos_respaldo['df_polizas'])
-        st.success("Base de pólizas guardada correctamente.")
+        st.success("Base de pólizas guardada.")
 
-# B. Actualizar Curva
 with st.sidebar.expander("📈 Cargar / Actualizar Curva de Riesgo"):
     file_curva = st.file_uploader("Archivo Curva (.xlsx)", type=['xlsx'], key="up_curva")
     if st.button("Aplicar Curva") and file_curva:
@@ -128,7 +149,6 @@ with st.sidebar.expander("📈 Cargar / Actualizar Curva de Riesgo"):
         st.session_state['df_curva'].to_pickle(archivos_respaldo['df_curva'])
         st.success("Curva de riesgo guardada.")
 
-# C. Actualizar Siniestros
 with st.sidebar.expander("💥 Cargar / Actualizar Siniestros"):
     file_siniestros = st.file_uploader("Archivo Siniestros (.xlsx)", type=['xlsx'], key="up_siniestros")
     if st.button("Aplicar Siniestros") and file_siniestros:
@@ -138,7 +158,6 @@ with st.sidebar.expander("💥 Cargar / Actualizar Siniestros"):
 
 st.sidebar.divider()
 
-# Botón Maestro de Cálculo
 if st.session_state['df_polizas'] is not None and st.session_state['df_curva'] is not None and st.session_state['df_siniestros'] is not None:
     if st.sidebar.button("⚙️ Procesar y Calcular Tarifas", type="primary"):
         with st.spinner("Ejecutando modelos de credibilidad..."):
@@ -179,7 +198,6 @@ if st.session_state['datos_procesados'] is not None:
     if poliza_seleccionada:
         if poliza_seleccionada in lista_polizas:
             
-            # Limpiar la memoria de la carta si cambiamos de póliza
             if st.session_state['poliza_actual_ia'] != poliza_seleccionada:
                 st.session_state['carta_generada'] = None
                 st.session_state['poliza_actual_ia'] = poliza_seleccionada
@@ -190,18 +208,18 @@ if st.session_state['datos_procesados'] is not None:
             
             st.header(f"Resultados para la Póliza: `{poliza_seleccionada}`")
 
-            # --- Tarjetas de Métricas ---
+            # --- Tarjetas Visuales Actualizadas ---
             col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.metric(label="Factor Credibilidad (Z)", value=f"{datos_poliza['Z'] * 100:.2f}%")
+                st.metric(label="TPR del Producto (2025)", value=f"{datos_poliza['TPR']:.5f}")
             with col2:
-                st.metric(label="Tasa Pura de Riesgo (TPR)", value=f"{datos_poliza['Tasa Unica pura de riesgo']:.4f}")
+                st.metric(label="Factor Credibilidad (Z)", value=f"{datos_poliza['Z'] * 100:.2f}%")
             with col3:
-                diferencia_tasa = datos_poliza['tasa_cred'] - datos_poliza['Tasa Unica pura de riesgo']
-                st.metric(label="Tasa Credibilizada", value=f"{datos_poliza['tasa_cred']:.4f}", 
-                          delta=f"{diferencia_tasa:.4f} vs Pura", delta_color="inverse")
+                diferencia_tasa = datos_poliza['tasa_cred'] - datos_poliza['TPR']
+                st.metric(label="Tasa Credibilizada", value=f"{datos_poliza['tasa_cred']:.5f}", 
+                          delta=f"{diferencia_tasa:.5f} vs TPR", delta_color="inverse")
             with col4:
-                st.metric(label="Tasa Comercial Unica", value=f"{datos_poliza['Tasa Unica comercial']:.4f}")
+                st.metric(label="Tasa Cred. Comercial", value=f"{datos_poliza['tasa_cred_com']:.5f}")
 
             st.divider()
 
@@ -217,7 +235,7 @@ if st.session_state['datos_procesados'] is not None:
             with st.expander("Ver tabla completa de la póliza (Detalles crudos)"):
                 st.dataframe(pd.DataFrame(datos_poliza).T, use_container_width=True)
             
-            # --- SECCIÓN DE IA: INTEGRADA CORRECTAMENTE ---
+            # --- SECCIÓN DE IA ---
             st.divider()
             st.subheader("🤖 Asistente de Renovación IA")
 
@@ -231,8 +249,8 @@ if st.session_state['datos_procesados'] is not None:
                 st.warning("⚠️ Esta póliza presenta un incremento atípico. Se sugiere generar la carta de renovación.")
 
             if st.button("✨ Generar Carta al Cliente con IA"):
-                if not API_KEY or modelo is None:
-                    st.error("Falta la API Key de Gemini. Por favor, ingrésela en la barra lateral.")
+                if modelo is None:
+                    st.error("Falta la configuración de la IA en los secretos.")
                 else:
                     with st.spinner("Redactando propuesta comercial..."):
                         prompt = f"""
@@ -252,12 +270,10 @@ if st.session_state['datos_procesados'] is not None:
                         respuesta = modelo.generate_content(prompt)
                         st.session_state['carta_generada'] = respuesta.text
 
-            # Mostrar carta generada y botón de Word si existe en memoria
             if st.session_state['carta_generada']:
                 st.markdown("### Vista Previa de la Carta:")
                 st.write(st.session_state['carta_generada'])
                 
-                # Generación del archivo Word en memoria
                 doc = Document()
                 doc.add_heading(f'Propuesta de Renovación - Póliza {poliza_seleccionada}', 0)
                 doc.add_paragraph(st.session_state['carta_generada'])
