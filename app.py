@@ -1,22 +1,35 @@
+
+import openpyxl
 import streamlit as st
 import pandas as pd
 import numpy as np
-import openpyxl
+import os
 
 # 1. Configuración básica
 st.set_page_config(page_title="Cotizador de Renovaciones", page_icon="🛡️", layout="wide")
 st.title("🛡️ Herramienta de Tarifación para Renovaciones")
 
-# 2. Inicializar la "Memoria" de las bases de datos individuales
-# Así podemos actualizar una sin borrar las otras.
-for key in ['df_polizas', 'df_curva', 'df_siniestros', 'datos_procesados']:
-    if key not in st.session_state:
-        st.session_state[key] = None
+# --- NUEVO: SISTEMA DE AUTO-GUARDADO Y RECUPERACIÓN ---
+archivos_respaldo = {
+    'df_polizas': 'backup_polizas.pkl',
+    'df_curva': 'backup_curva.pkl',
+    'df_siniestros': 'backup_siniestros.pkl',
+    'datos_procesados': 'backup_procesados.pkl'
+}
 
-# 3. Función de procesamiento (ahora recibe DataFrames, no archivos)
+# 2. Inicializar Memoria (Leyendo del disco si existen respaldos)
+for key, archivo in archivos_respaldo.items():
+    if key not in st.session_state:
+        # Si el archivo de respaldo existe físicamente, lo cargamos
+        if os.path.exists(archivo):
+            st.session_state[key] = pd.read_pickle(archivo)
+        else:
+            st.session_state[key] = None
+
+
+# 3. Función de procesamiento principal
 @st.cache_data(show_spinner=False)
 def procesar_datos(polizas_raw, curva_raw, siniestros_raw):
-    # Hacemos copias para no alterar los datos crudos en memoria
     polizas = polizas_raw.copy()
     curva_riesgo = curva_raw.copy()
     siniestros = siniestros_raw.copy()
@@ -64,14 +77,13 @@ def procesar_datos(polizas_raw, curva_raw, siniestros_raw):
 # 4. BARRA LATERAL: Gestión Modular de Datos
 st.sidebar.header("📂 1. Gestión de Bases de Datos")
 
-# Indicadores de estado visuales
 estado_p = "🟢" if st.session_state['df_polizas'] is not None else "🔴"
 estado_c = "🟢" if st.session_state['df_curva'] is not None else "🔴"
 estado_s = "🟢" if st.session_state['df_siniestros'] is not None else "🔴"
 st.sidebar.markdown(f"{estado_p} Pólizas | {estado_c} Curva | {estado_s} Siniestros")
 st.sidebar.divider()
 
-# A. Actualizar Pólizas (Permite Update/Insert)
+# A. Actualizar Pólizas
 with st.sidebar.expander("📄 Cargar / Actualizar Pólizas"):
     file_polizas = st.file_uploader("Archivo de Pólizas (.txt, .csv)", type=['txt', 'csv'], key="up_polizas")
     modo_carga = st.radio("Acción a realizar:", ["Reemplazar toda la base", "Actualizar / Agregar específicas"])
@@ -81,30 +93,31 @@ with st.sidebar.expander("📄 Cargar / Actualizar Pólizas"):
         
         if modo_carga == "Reemplazar toda la base" or st.session_state['df_polizas'] is None:
             st.session_state['df_polizas'] = df_nuevo
-            st.success("Base de pólizas reemplazada con éxito.")
         else:
-            # Lógica de Upsert (Actualizar y Agregar)
             ids_nuevos = df_nuevo['Poliza_Id'].unique()
             df_actual = st.session_state['df_polizas']
-            # Quitamos los registros viejos de las pólizas que estamos actualizando
             df_actual = df_actual[~df_actual['Poliza_Id'].isin(ids_nuevos)]
-            # Unimos la base vieja (limpia) con los datos nuevos
             st.session_state['df_polizas'] = pd.concat([df_actual, df_nuevo], ignore_index=True)
-            st.success(f"Se actualizaron/agregaron {len(ids_nuevos)} pólizas exitosamente.")
+            
+        # GUARDAR EN DISCO FÍSICO
+        st.session_state['df_polizas'].to_pickle(archivos_respaldo['df_polizas'])
+        st.success("Base de pólizas guardada correctamente.")
 
 # B. Actualizar Curva
 with st.sidebar.expander("📈 Cargar / Actualizar Curva de Riesgo"):
     file_curva = st.file_uploader("Archivo Curva (.xlsx)", type=['xlsx'], key="up_curva")
     if st.button("Aplicar Curva") and file_curva:
         st.session_state['df_curva'] = pd.read_excel(file_curva)
-        st.success("Curva de riesgo actualizada.")
+        st.session_state['df_curva'].to_pickle(archivos_respaldo['df_curva']) # Guardar
+        st.success("Curva de riesgo guardada.")
 
 # C. Actualizar Siniestros
 with st.sidebar.expander("💥 Cargar / Actualizar Siniestros"):
     file_siniestros = st.file_uploader("Archivo Siniestros (.xlsx)", type=['xlsx'], key="up_siniestros")
     if st.button("Aplicar Siniestros") and file_siniestros:
         st.session_state['df_siniestros'] = pd.read_excel(file_siniestros)
-        st.success("Siniestros históricos actualizados.")
+        st.session_state['df_siniestros'].to_pickle(archivos_respaldo['df_siniestros']) # Guardar
+        st.success("Siniestros históricos guardados.")
 
 st.sidebar.divider()
 
@@ -119,12 +132,19 @@ if st.session_state['df_polizas'] is not None and st.session_state['df_curva'] i
                     st.session_state['df_siniestros']
                 )
                 st.session_state['datos_procesados'] = df_final
-                st.sidebar.success("✅ Cálculos actualizados.")
+                # GUARDAR RESULTADOS FINALES EN DISCO
+                df_final.to_pickle(archivos_respaldo['datos_procesados'])
+                st.sidebar.success("✅ Cálculos procesados y guardados.")
             except Exception as e:
                 st.sidebar.error(f"Error al calcular: {e}")
-else:
-    st.sidebar.info("Carga las 3 bases de datos (🟢) para habilitar el cálculo.")
 
+# Botón para borrar todos los datos si se necesita empezar de cero
+if st.sidebar.button("🗑️ Borrar toda la base de datos"):
+    for key, archivo in archivos_respaldo.items():
+        st.session_state[key] = None
+        if os.path.exists(archivo):
+            os.remove(archivo)
+    st.rerun()
 
 # 5. PANTALLA PRINCIPAL: Buscador y Resultados
 if st.session_state['datos_procesados'] is not None:
@@ -132,7 +152,6 @@ if st.session_state['datos_procesados'] is not None:
     
     st.subheader("🔍 2. Consultar Póliza")
     
-    # Sistema de búsqueda dual (Teclado o Lista)
     col_busqueda1, col_busqueda2 = st.columns(2)
     with col_busqueda1:
         busqueda_texto = st.text_input("Buscar por ID de Póliza (Escriba y presione Enter):", placeholder="Ej: 109553448")
@@ -140,17 +159,14 @@ if st.session_state['datos_procesados'] is not None:
         lista_polizas = df_resultados['Poliza_Id'].astype(str).unique()
         busqueda_lista = st.selectbox("O seleccione de la lista:", [""] + list(lista_polizas))
 
-    # Determinar qué póliza usar (prioridad al texto si se escribió algo)
     poliza_seleccionada = busqueda_texto if busqueda_texto != "" else busqueda_lista
 
     if poliza_seleccionada:
-        # Validar si la póliza existe
         if poliza_seleccionada in lista_polizas:
             datos_poliza = df_resultados[df_resultados['Poliza_Id'].astype(str) == poliza_seleccionada].iloc[0]
 
             st.header(f"Resultados para la Póliza: `{poliza_seleccionada}`")
 
-            # Tarjetas de Tasas y Credibilidad
             col1, col2, col3, col4 = st.columns(4)
             with col1:
                 st.metric(label="Factor Credibilidad (Z)", value=f"{datos_poliza['Z'] * 100:.2f}%")
@@ -165,7 +181,6 @@ if st.session_state['datos_procesados'] is not None:
 
             st.divider()
 
-            # Tarjetas de Primas
             st.subheader("Comparativo Financiero")
             col_a, col_b, col_c = st.columns(3)
             with col_a:
