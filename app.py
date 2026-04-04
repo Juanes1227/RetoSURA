@@ -215,9 +215,9 @@ if st.session_state['datos_procesados'] is not None:
             with col2:
                 st.metric(label="Factor Credibilidad (Z)", value=f"{datos_poliza['Z'] * 100:.2f}%")
             with col3:
-                diferencia_tasa = datos_poliza['tasa_cred'] - datos_poliza['TPR']
+                diferencia_tasa = datos_poliza['tasa_cred'] - datos_poliza['Tasa Unica pura de riesgo']
                 st.metric(label="Tasa Credibilizada", value=f"{datos_poliza['tasa_cred']:.5f}", 
-                          delta=f"{diferencia_tasa:.5f} vs TPR", delta_color="inverse")
+                          delta=f"{diferencia_tasa:.5f} vs TUPR", delta_color="inverse")
             with col4:
                 st.metric(label="Tasa Cred. Comercial", value=f"{datos_poliza['tasa_cred_com']:.5f}")
 
