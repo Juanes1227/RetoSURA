@@ -196,3 +196,71 @@ if st.session_state['datos_procesados'] is not None:
             st.error(f"❌ La póliza '{poliza_seleccionada}' no se encuentra en la base de datos actual.")
 else:
     st.info("👈 Sube los archivos en la barra lateral y presiona 'Procesar y Calcular Tarifas' para comenzar.")
+    
+import google.generativeai as genai
+from docx import Document
+import io
+
+# ... (Tu código previo de cálculos y st.metric) ...
+
+st.divider()
+st.subheader("🤖 Asistente de Renovación IA")
+
+prima_anterior = datos_poliza['Prima por Cobertura']
+prima_nueva = datos_poliza['prima_recomendada']
+variacion_pct = ((prima_nueva - prima_anterior) / prima_anterior) * 100 if prima_anterior > 0 else 0
+
+st.info(f"Variación de la prima: **{variacion_pct:,.2f}%**")
+
+# 1. Filtro estricto para aumentos
+umbral_atipico = st.slider("Generar alerta si el aumento supera el (%):", 0, 100, 20)
+es_atipica = variacion_pct > umbral_atipico
+
+if es_atipica:
+    st.warning("⚠️ Esta póliza presenta un incremento atípico. Se sugiere generar la carta de renovación.")
+
+if st.button("✨ Generar Carta al Cliente con IA"):
+    if not API_KEY:
+        st.error("Falta la API Key de Gemini.")
+    else:
+        with st.spinner("Redactando propuesta comercial..."):
+            
+            prompt = f"""
+            Actúa como un suscriptor de seguros experto y empático.
+            Redacta UNA carta formal dirigida al cliente de la póliza {poliza_seleccionada}.
+            
+            Contexto:
+            - Valor Asegurado: ${datos_poliza['VA_Solo_Vida']:,.2f}
+            - Prima Anterior: ${prima_anterior:,.2f}
+            - Prima Nueva Recomendada: ${prima_nueva:,.2f}
+            
+            Instrucciones:
+            Justifica suavemente el incremento de la prima mencionando el ajuste por riesgo y las condiciones macroeconómicas, sin usar jerga actuarial compleja. 
+            El tono debe ser profesional, agradecido por su fidelidad y enfocado en la protección continua que le brinda la póliza.
+            No incluyas saludos genéricos como [Nombre del Cliente], usa "Estimado Cliente".
+            """
+            
+            respuesta = modelo.generate_content(prompt)
+            texto_carta = respuesta.text
+            
+            st.markdown("### Vista Previa de la Carta:")
+            st.write(texto_carta)
+            
+            # 2. Generación del archivo Word en memoria
+            doc = Document()
+            doc.add_heading(f'Propuesta de Renovación - Póliza {poliza_seleccionada}', 0)
+            doc.add_paragraph(texto_carta)
+            
+            # Guardamos el documento en un buffer de memoria en vez del disco duro
+            buffer = io.BytesIO()
+            doc.save(buffer)
+            buffer.seek(0)
+            
+            # 3. Botón nativo de Streamlit para descargar el Word
+            st.download_button(
+                label="📥 Descargar Carta en Word (.docx)",
+                data=buffer,
+                file_name=f"Renovacion_Poliza_{poliza_seleccionada}.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                type="primary"
+            )
