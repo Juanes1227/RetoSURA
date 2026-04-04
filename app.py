@@ -83,12 +83,15 @@ def procesar_datos(polizas_raw, curva_raw, siniestros_raw):
 
 # 4. BARRA LATERAL: Configuración y Datos
 st.sidebar.header("🔑 Configuración IA")
-API_KEY = st.sidebar.text_input("API Key de Gemini:", type="password")
 
-if API_KEY:
+# Leemos la clave de los secretos en lugar de pedirla por pantalla
+try:
+    API_KEY = st.secrets["GEMINI_API_KEY"]
     genai.configure(api_key=API_KEY)
     modelo = genai.GenerativeModel('gemini-2.5-flash')
-else:
+    st.sidebar.success("✅ IA Conectada Automáticamente")
+except KeyError:
+    st.sidebar.error("Falta configurar la API Key en los secretos.")
     modelo = None
 
 st.sidebar.divider()
