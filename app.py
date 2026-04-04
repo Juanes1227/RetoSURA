@@ -164,7 +164,8 @@ if st.session_state['datos_procesados'] is not None:
     if poliza_seleccionada:
         if poliza_seleccionada in lista_polizas:
             datos_poliza = df_resultados[df_resultados['Poliza_Id'].astype(str) == poliza_seleccionada].iloc[0]
-
+            prima_anterior = datos_poliza['Prima por Cobertura']
+            prima_nueva = datos_poliza['prima_recomendada']
             st.header(f"Resultados para la Póliza: `{poliza_seleccionada}`")
 
             col1, col2, col3, col4 = st.columns(4)
@@ -206,8 +207,8 @@ import io
 st.divider()
 st.subheader("🤖 Asistente de Renovación IA")
 
-prima_anterior = datos_poliza['Prima por Cobertura']
-prima_nueva = datos_poliza['prima_recomendada']
+#prima_anterior = datos_poliza['Prima por Cobertura']
+#prima_nueva = datos_poliza['prima_recomendada']
 variacion_pct = ((prima_nueva - prima_anterior) / prima_anterior) * 100 if prima_anterior > 0 else 0
 
 st.info(f"Variación de la prima: **{variacion_pct:,.2f}%**")
