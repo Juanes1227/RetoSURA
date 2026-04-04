@@ -1,6 +1,10 @@
+pip install openpyxl
+
 import streamlit as st
 import pandas as pd
 import numpy as np
+import openpyxl
+
 
 # 1. Configuración básica de la página
 st.set_page_config(
