@@ -110,12 +110,22 @@ def procesar_datos(polizas_raw, curva_raw, siniestros_raw):
 # 4. BARRA LATERAL: Configuración y Datos
 st.sidebar.header("🔑 Configuración IA")
 try:
-    API_KEY = st.secrets["GEMINI_API_KEY"]
+    API_KEY = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY"))
+    if API_KEY is None:
+        raise KeyError
+        
     genai.configure(api_key=API_KEY)
     modelo = genai.GenerativeModel('gemini-2.5-flash')
+    st.sidebar.success("✅ IA Conectada")
 except KeyError:
-    st.sidebar.warning("API Key no encontrada en secrets.toml")
-    modelo = None
+    st.sidebar.warning("Usando modo manual temporal.")
+    # Te pedirá la llave en la pantalla solo mientras solucionamos lo del archivo
+    API_KEY = st.sidebar.text_input("Pega tu API Key aquí para continuar:", type="password")
+    if API_KEY:
+        genai.configure(api_key=API_KEY)
+        modelo = genai.GenerativeModel('gemini-2.5-flash')
+    else:
+        modelo = None
 
 st.sidebar.divider()
 st.sidebar.header("📂 1. Gestión de Bases de Datos")
