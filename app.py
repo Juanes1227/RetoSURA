@@ -220,7 +220,7 @@ if st.session_state['datos_procesados'] is not None:
 
             # --- Tarjetas Visuales Actualizadas ---
             col1, col2, col3, col4 = st.columns(4)
-            with col1
+            with col1:
                 st.metric(label="TPR del Producto (2025)", value=f"{datos_poliza['TPR']:.3f}%")
             with col2:
                 st.metric(label="Factor Credibilidad (Z)", value=f"{datos_poliza['Z'] * 100:.2f}%")
